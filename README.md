@@ -5,9 +5,10 @@ A digital safe box
 
 ## General
 - [X] basic command line
-- [ ] enc/dec a simple file by master key
-- [ ] support JSON structured file, and enc only field value
+- [ ] enc/dec a simple file by master key (AES-256)
+- [ ] derive encryption key from master key (scrypt)
 - [ ] support SQLite as DB
+- [ ] add editor to modify the file
 
 ## Password Manager
 - [ ] password generator
