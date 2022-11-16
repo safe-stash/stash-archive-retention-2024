@@ -1,5 +1,6 @@
 use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use clap::{Parser, Subcommand};
+use scrypt::{password_hash::SaltString, Params};
 use std::error::Error;
 use std::fs::File;
 use std::io;
@@ -42,7 +43,14 @@ type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
 fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
 
-    let key = [0x42; 32];
+    let pass_str = rpassword::prompt_password("Enter the master password: ").unwrap();
+    let pass = pass_str.as_bytes();
+    let salt_str = SaltString::new("qYhaxiWJY63Try2WycoOtg")?; // ::generate(&mut scrypt::password_hash::rand_core::OsRng);
+    let salt = salt_str.as_bytes();
+    let params = Params::new(13, 8, 1)?; // log_n=13 for fast calculation; OWASP recommended log_n=16
+    let mut key = [0; 32];
+    scrypt::scrypt(pass, salt, &params, &mut key)?;
+
     let iv = [0x24; 16];
 
     match &cli.command {

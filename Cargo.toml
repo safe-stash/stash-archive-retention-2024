@@ -9,4 +9,5 @@ edition = "2021"
 aes = "0.8.2"
 cbc = { version = "0.1.2", features = ["alloc"] }
 clap = { version = "4.0.22", features = ["derive"] }
+rpassword = "7.1.0"
 scrypt = "0.10.0"
