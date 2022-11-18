@@ -53,8 +53,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let iv = [0x24; 16];
 
-    // println!("Derrived key: {:}", hex::encode(&key));
-
     match &cli.command {
         Commands::Enc { input, output } => {
             let buf = read_file(input)?;
@@ -73,7 +71,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     Some(o) => write_file(o, &res)?,
                     None => write_stdout(&res)?,
                 },
-                Err(e) => println!("Decode failed: {:?}", e)
+                Err(e) => println!("Decryption failed: {:?}", e)
             }
         }
     }
