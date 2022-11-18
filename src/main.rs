@@ -53,6 +53,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let iv = [0x24; 16];
 
+    // println!("Derrived key: {:}", hex::encode(&key));
+
     match &cli.command {
         Commands::Enc { input, output } => {
             let buf = read_file(input)?;
@@ -60,19 +62,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                 Aes256CbcEnc::new(&key.into(), &iv.into()).encrypt_padded_vec_mut::<Pkcs7>(&buf);
 
             match output {
-                Some(o) => write_file(o, &buf)?,
+                Some(o) => write_file(o, &res)?,
                 None => write_stdout(&res)?,
             }
         }
         Commands::Dec { input, output } => {
             let buf = read_file(input)?;
-            let res = Aes256CbcDec::new(&key.into(), &iv.into())
-                .decrypt_padded_vec_mut::<Pkcs7>(&buf)
-                .unwrap();
-
-            match output {
-                Some(o) => write_file(o, &buf)?,
-                None => write_stdout(&res)?,
+            match Aes256CbcDec::new(&key.into(), &iv.into()).decrypt_padded_vec_mut::<Pkcs7>(&buf) {
+                Ok(res) => match output {
+                    Some(o) => write_file(o, &res)?,
+                    None => write_stdout(&res)?,
+                },
+                Err(e) => println!("Decode failed: {:?}", e)
             }
         }
     }
