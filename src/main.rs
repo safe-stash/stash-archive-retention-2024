@@ -50,11 +50,16 @@ enum Commands {
     },
     /// Get an item from vault
     Get {
-        /// Service name to be searched
+        /// Item name to be searched
         name: String,
     },
     /// List saved items
     List {},
+    /// remove an item from vault
+    Remove {
+        /// Item name to be removed
+        name: String,
+    },
 }
 
 type Aes256CbcEnc = cbc::Encryptor<aes::Aes256>;
@@ -69,7 +74,18 @@ struct VaultItem {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
-    let conn = Connection::open("safe.db")?;
+    
+    let conn = Connection::open("safe.db").expect("No db");
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS vault (
+             id INTEGER PRIMARY KEY,
+             item_name TEXT NOT NULL UNIQUE,
+             item_value BLOB
+         )",
+        [],
+    )
+    .expect("Failed to create db");
+    
     let key = kdf().unwrap();
     let iv = [0x24; 16];
 
@@ -95,17 +111,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         Commands::Put { name, value, force } => {
             let res = Aes256CbcEnc::new(&key.into(), &iv.into())
-                .encrypt_padded_vec_mut::<Pkcs7>(&value.as_bytes());
-
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS vault (
-                     id INTEGER PRIMARY KEY,
-                     item_name TEXT NOT NULL UNIQUE,
-                     item_value BLOB
-                 )",
-                [],
-            )
-            .expect("Failed to create db");
+                .encrypt_padded_vec_mut::<Pkcs7>(&value.as_bytes());           
 
             let item = VaultItem {
                 _id: 0,
@@ -160,7 +166,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .decrypt_padded_vec_mut::<Pkcs7>(&item.item_value)
                     {
                         Ok(res) => println!(
-                            "Value for {:} is {:}",
+                            "{:}={:}",
                             item.item_name,
                             String::from_utf8(res).expect("Failed to convert bytes")
                         ),
@@ -196,6 +202,20 @@ fn main() -> Result<(), Box<dyn Error>> {
                     ),
                     Err(e) => println!("Finding item error, decryption failed: {:?}", e),
                 }
+            }
+        }
+        Commands::Remove { name } => {
+            let mut stmt = conn
+                .prepare("DELETE FROM vault WHERE item_name=?")
+                .expect("Failed to prepare delete query");
+
+            match stmt.execute([&name]) {
+                Ok(v) => {
+                    if v == 1 {
+                        println!("{:} deleted.", &name)
+                    }
+                }
+                Err(e) => println!("{:}", e),
             }
         }
     }
