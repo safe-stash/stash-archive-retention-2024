@@ -1,5 +1,6 @@
 use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use clap::{Parser, Subcommand};
+use rusqlite::{Connection, Result};
 use scrypt::{password_hash::SaltString, Params};
 use std::error::Error;
 use std::fs::File;
@@ -35,32 +36,48 @@ enum Commands {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+    /// Insert an item into vault
+    Put {
+        /// Item name
+        name: String,
+
+        /// Value of item to be encrypted
+        value: String,
+
+        /// Update value if exists
+        #[arg(short, long, required(false), default_value_t = false)]
+        force: bool,
+    },
+    /// Get an item from vault
+    Get {
+        /// Service name to be searched
+        name: String,
+    },
+    /// List saved items
+    List {},
 }
 
 type Aes256CbcEnc = cbc::Encryptor<aes::Aes256>;
 type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
 
+#[derive(Debug)]
+struct VaultItem {
+    _id: i32,
+    item_name: String,
+    item_value: Vec<u8>,
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
-
-    let pass = rpassword::prompt_password("Enter the master password: ").unwrap();
-    let pass = pass.as_bytes();
-
-    let salt = SaltString::new("qYhaxiWJY63Try2WycoOtg")?; // ::generate(&mut scrypt::password_hash::rand_core::OsRng);
-    let salt = salt.as_bytes();
-    
-    let params = Params::new(13, 8, 1)?; // log_n=13 for fast calculation; OWASP recommended log_n=16
-    let mut key = [0; 32];
+    let conn = Connection::open("safe.db")?;
+    let key = kdf().unwrap();
     let iv = [0x24; 16];
-    
-    scrypt::scrypt(pass, salt, &params, &mut key)?;
 
     match &cli.command {
         Commands::Enc { input, output } => {
             let buf = read_file(input)?;
             let res =
                 Aes256CbcEnc::new(&key.into(), &iv.into()).encrypt_padded_vec_mut::<Pkcs7>(&buf);
-
             match output {
                 Some(o) => write_file(o, &res)?,
                 None => write_stdout(&res)?,
@@ -73,7 +90,112 @@ fn main() -> Result<(), Box<dyn Error>> {
                     Some(o) => write_file(o, &res)?,
                     None => write_stdout(&res)?,
                 },
-                Err(e) => println!("Decryption failed: {:?}", e)
+                Err(e) => println!("Decryption failed: {:?}", e),
+            }
+        }
+        Commands::Put { name, value, force } => {
+            let res = Aes256CbcEnc::new(&key.into(), &iv.into())
+                .encrypt_padded_vec_mut::<Pkcs7>(&value.as_bytes());
+
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS vault (
+                     id INTEGER PRIMARY KEY,
+                     item_name TEXT NOT NULL UNIQUE,
+                     item_value BLOB
+                 )",
+                [],
+            )
+            .expect("Failed to create db");
+
+            let item = VaultItem {
+                _id: 0,
+                item_name: name.to_string(),
+                item_value: res,
+            };
+
+            match conn.execute(
+                "INSERT INTO vault (item_name, item_value) values (?1, ?2)",
+                (&item.item_name, &item.item_value),
+            ) {
+                Ok(_) => println!("{:} saved.", &name),
+                Err(e) => {
+                    if let rusqlite::Error::SqliteFailure(rc, _) = e {
+                        if rc.code == rusqlite::ErrorCode::ConstraintViolation {
+                            if *force {
+                                let mut stmt = conn
+                                    .prepare(
+                                        "UPDATE vault SET item_value = ?1 WHERE item_name = ?2",
+                                    )
+                                    .expect("Preparing update item failed");
+
+                                stmt.execute(rusqlite::params![item.item_value, item.item_name])
+                                    .expect("Updating item failed");
+
+                                println!("{:} updated", name)
+                            } else {
+                                println!("{:} already exists! (error={:}), please try with -f to force update", 
+                                    &name, rc.extended_code)
+                            }
+                        }
+                    } else {
+                        println!("{:}", e);
+                    }
+                }
+            }
+        }
+        Commands::Get { name } => {
+            let mut stmt = conn
+                .prepare("SELECT * FROM vault WHERE item_name=?")
+                .expect("Failed to query db");
+
+            match stmt.query_row([&name], |row| {
+                Ok(VaultItem {
+                    _id: row.get(0)?,
+                    item_name: row.get(1)?,
+                    item_value: row.get(2)?,
+                })
+            }) {
+                Ok(item) => {
+                    match Aes256CbcDec::new(&key.into(), &iv.into())
+                        .decrypt_padded_vec_mut::<Pkcs7>(&item.item_value)
+                    {
+                        Ok(res) => println!(
+                            "Value for {:} is {:}",
+                            item.item_name,
+                            String::from_utf8(res).expect("Failed to convert bytes")
+                        ),
+                        Err(e) => println!("Decryption failed during finding an item: {:?}", e),
+                    }
+                }
+                Err(e) => println!("Failed to find {:}: {:}", &name, e),
+            }
+        }
+        Commands::List {} => {
+            let mut stmt = conn
+                .prepare("SELECT * FROM vault")
+                .expect("Failed to query db");
+            let item_iter = stmt
+                .query_map([], |row| {
+                    Ok(VaultItem {
+                        _id: row.get(0)?,
+                        item_name: row.get(1)?,
+                        item_value: row.get(2)?,
+                    })
+                })
+                .expect("Failed to find all items");
+
+            for item in item_iter {
+                let item = item.expect("Reading item from db failed");
+                match Aes256CbcDec::new(&key.into(), &iv.into())
+                    .decrypt_padded_vec_mut::<Pkcs7>(&item.item_value)
+                {
+                    Ok(res) => println!(
+                        "{:}={:}",
+                        item.item_name,
+                        String::from_utf8(res).expect("Failed to convert fetched data")
+                    ),
+                    Err(e) => println!("Finding item error, decryption failed: {:?}", e),
+                }
             }
         }
     }
@@ -113,4 +235,22 @@ fn write_stdout(buf: &Vec<u8>) -> Result<(), Box<dyn Error>> {
     stdout.write_all(buf)?;
     stdout.flush()?;
     Ok(())
+}
+
+/// Produces the derived key as output
+///
+/// # Errors
+///
+/// This function will return an error if cannot derive key from a password
+fn kdf() -> Result<[u8; 32], Box<dyn Error>> {
+    let pass = rpassword::prompt_password("Password: ").unwrap();
+    let pass = pass.as_bytes();
+    let salt = SaltString::new("qYhaxiWJY63Try2WycoOtg")?; // ::generate(&mut scrypt::password_hash::rand_core::OsRng);
+    let salt = salt.as_bytes();
+    let params = Params::new(13, 8, 1)?; // log_n=13 for fast calculation; OWASP recommended log_n=16
+    let mut key = [0; 32];
+
+    scrypt::scrypt(pass, salt, &params, &mut key)?;
+
+    Ok(key)
 }
