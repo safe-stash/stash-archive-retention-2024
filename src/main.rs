@@ -6,7 +6,7 @@ use std::error::Error;
 use std::fs::File;
 use std::io;
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Parser, Debug)]
 #[command(about = "Safe is a digital safe box")]
@@ -37,7 +37,7 @@ enum Commands {
         output: Option<PathBuf>,
     },
     /// Insert an item into vault
-    Put {
+    Add {
         /// Item name
         name: String,
 
@@ -74,18 +74,9 @@ struct VaultItem {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
-    
-    let conn = Connection::open("safe.db").expect("No db");
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS vault (
-             id INTEGER PRIMARY KEY,
-             item_name TEXT NOT NULL UNIQUE,
-             item_value BLOB
-         )",
-        [],
-    )
-    .expect("Failed to create db");
-    
+
+    let conn = sqlite_open("safe.db").expect("Failed to create or open sqlite db");
+
     let key = kdf().unwrap();
     let iv = [0x24; 16];
 
@@ -99,6 +90,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 None => write_stdout(&res)?,
             }
         }
+
         Commands::Dec { input, output } => {
             let buf = read_file(input)?;
             match Aes256CbcDec::new(&key.into(), &iv.into()).decrypt_padded_vec_mut::<Pkcs7>(&buf) {
@@ -109,9 +101,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                 Err(e) => println!("Decryption failed: {:?}", e),
             }
         }
-        Commands::Put { name, value, force } => {
+
+        Commands::Add { name, value, force } => {
             let res = Aes256CbcEnc::new(&key.into(), &iv.into())
-                .encrypt_padded_vec_mut::<Pkcs7>(&value.as_bytes());           
+                .encrypt_padded_vec_mut::<Pkcs7>(&value.as_bytes());
 
             let item = VaultItem {
                 _id: 0,
@@ -119,106 +112,46 @@ fn main() -> Result<(), Box<dyn Error>> {
                 item_value: res,
             };
 
-            match conn.execute(
-                "INSERT INTO vault (item_name, item_value) values (?1, ?2)",
-                (&item.item_name, &item.item_value),
-            ) {
-                Ok(_) => println!("{:} saved.", &name),
-                Err(e) => {
-                    if let rusqlite::Error::SqliteFailure(rc, _) = e {
-                        if rc.code == rusqlite::ErrorCode::ConstraintViolation {
-                            if *force {
-                                let mut stmt = conn
-                                    .prepare(
-                                        "UPDATE vault SET item_value = ?1 WHERE item_name = ?2",
-                                    )
-                                    .expect("Preparing update item failed");
-
-                                stmt.execute(rusqlite::params![item.item_value, item.item_name])
-                                    .expect("Updating item failed");
-
-                                println!("{:} updated", name)
-                            } else {
-                                println!("{:} already exists! (error={:}), please try with -f to force update", 
-                                    &name, rc.extended_code)
-                            }
-                        }
-                    } else {
-                        println!("{:}", e);
-                    }
-                }
-            }
+            sqlite_add(&conn, &item, force);
         }
-        Commands::Get { name } => {
-            let mut stmt = conn
-                .prepare("SELECT * FROM vault WHERE item_name=?")
-                .expect("Failed to query db");
 
-            match stmt.query_row([&name], |row| {
-                Ok(VaultItem {
-                    _id: row.get(0)?,
-                    item_name: row.get(1)?,
-                    item_value: row.get(2)?,
-                })
-            }) {
-                Ok(item) => {
-                    match Aes256CbcDec::new(&key.into(), &iv.into())
-                        .decrypt_padded_vec_mut::<Pkcs7>(&item.item_value)
-                    {
-                        Ok(res) => println!(
-                            "{:}={:}",
-                            item.item_name,
-                            String::from_utf8(res).expect("Failed to convert bytes")
-                        ),
-                        Err(e) => println!("Decryption failed during finding an item: {:?}", e),
-                    }
-                }
-                Err(e) => println!("Failed to find {:}: {:}", &name, e),
-            }
-        }
-        Commands::List {} => {
-            let mut stmt = conn
-                .prepare("SELECT * FROM vault")
-                .expect("Failed to query db");
-            let item_iter = stmt
-                .query_map([], |row| {
-                    Ok(VaultItem {
-                        _id: row.get(0)?,
-                        item_name: row.get(1)?,
-                        item_value: row.get(2)?,
-                    })
-                })
-                .expect("Failed to find all items");
-
-            for item in item_iter {
-                let item = item.expect("Reading item from db failed");
+        Commands::Get { name } => match sqlite_get(&conn, &name) {
+            Ok(item) => {
                 match Aes256CbcDec::new(&key.into(), &iv.into())
                     .decrypt_padded_vec_mut::<Pkcs7>(&item.item_value)
                 {
                     Ok(res) => println!(
                         "{:}={:}",
                         item.item_name,
-                        String::from_utf8(res).expect("Failed to convert fetched data")
+                        String::from_utf8(res).expect("Failed to convert bytes")
                     ),
-                    Err(e) => println!("Finding item error, decryption failed: {:?}", e),
+                    Err(e) => println!("Decryption failed during finding an item: {:?}", e),
                 }
             }
-        }
-        Commands::Remove { name } => {
-            let mut stmt = conn
-                .prepare("DELETE FROM vault WHERE item_name=?")
-                .expect("Failed to prepare delete query");
+            Err(e) => println!("{:}", e),
+        },
 
-            match stmt.execute([&name]) {
-                Ok(v) => {
-                    if v == 1 {
-                        println!("{:} deleted.", &name)
+        Commands::List {} => match sqlite_list(&conn) {
+            Ok(items) => {
+                for item in items {
+                    match Aes256CbcDec::new(&key.into(), &iv.into())
+                        .decrypt_padded_vec_mut::<Pkcs7>(&item.item_value)
+                    {
+                        Ok(res) => println!(
+                            "{:}={:}",
+                            item.item_name,
+                            String::from_utf8(res).expect("Failed to convert fetched data")
+                        ),
+                        Err(e) => println!("Finding item error, decryption failed: {:?}", e),
                     }
                 }
-                Err(e) => println!("{:}", e),
             }
-        }
+            Err(e) => println!("{:}", e),
+        },
+
+        Commands::Remove { name } => sqlite_remove(&conn, &name),
     }
+
     Ok(())
 }
 
@@ -273,4 +206,124 @@ fn kdf() -> Result<[u8; 32], Box<dyn Error>> {
     scrypt::scrypt(pass, salt, &params, &mut key)?;
 
     Ok(key)
+}
+
+/// Connects to sqlite database.
+///
+/// # Errors
+///
+/// This function will return an error if cannot create sqlite db.
+fn sqlite_open<P: AsRef<Path>>(path: P) -> Result<Connection, Box<dyn Error>> {
+    let conn = Connection::open(path)?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS vault (
+             id INTEGER PRIMARY KEY,
+             item_name TEXT NOT NULL UNIQUE,
+             item_value BLOB
+         )",
+        [],
+    )?;
+    Ok(conn)
+}
+
+/// Inserts an item to vault.
+///
+/// # Errors
+///
+/// This function will return an error if cannot insert into sqlite db.
+fn sqlite_add(conn: &Connection, item: &VaultItem, update: &bool) {
+    match conn.execute(
+        "INSERT INTO vault (item_name, item_value) values (?1, ?2)",
+        (&item.item_name, &item.item_value),
+    ) {
+        Ok(_) => println!("{:} saved.", &item.item_name),
+        Err(e) => {
+            if let rusqlite::Error::SqliteFailure(rc, _) = e {
+                if rc.code == rusqlite::ErrorCode::ConstraintViolation {
+                    if *update {
+                        let mut stmt = conn
+                            .prepare("UPDATE vault SET item_value = ?1 WHERE item_name = ?2")
+                            .expect("Preparing update item failed");
+
+                        stmt.execute(rusqlite::params![item.item_value, item.item_name])
+                            .expect("Updating item failed");
+
+                        println!("{:} updated", &item.item_name)
+                    } else {
+                        println!(
+                            "{:} already exists! (error={:}), please try with -f to force update",
+                            &item.item_name, rc.extended_code
+                        )
+                    }
+                }
+            } else {
+                println!("{:}", e);
+            }
+        }
+    }
+}
+
+/// Find an item in vault.
+///
+/// # Errors
+///
+/// This function will return an error if cannot execute query on sqlite db.
+fn sqlite_get(conn: &Connection, item_name: &String) -> Result<VaultItem, rusqlite::Error> {
+    let mut stmt = conn
+        .prepare("SELECT * FROM vault WHERE item_name=?")
+        .expect("Failed to query db");
+
+    stmt.query_row([&item_name], |row| {
+        Ok(VaultItem {
+            _id: row.get(0)?,
+            item_name: row.get(1)?,
+            item_value: row.get(2)?,
+        })
+    })
+}
+
+/// Find all items in vault.
+///
+/// # Errors
+///
+/// This function will return an error if cannot execute query on sqlite db.
+fn sqlite_list(conn: &Connection) -> Result<Vec<VaultItem>, Box<dyn Error>> {
+    let mut stmt = conn
+        .prepare("SELECT * FROM vault")
+        .expect("Failed to query db");
+
+    let item_iter = stmt.query_map([], |row| {
+        Ok(VaultItem {
+            _id: row.get(0)?,
+            item_name: row.get(1)?,
+            item_value: row.get(2)?,
+        })
+    })?;
+
+    let mut list: Vec<VaultItem> = Vec::new();
+    for item in item_iter {
+        list.push(item.unwrap());
+    }
+
+    Ok(list)
+}
+
+/// Remove and item from vault.
+///
+/// # Errors
+///
+/// This function will return an error if cannot execute query on sqlite db.
+fn sqlite_remove(conn: &Connection, name: &String) {
+    let mut stmt = conn
+        .prepare("DELETE FROM vault WHERE item_name=?")
+        .expect("Failed to prepare delete query");
+
+    match stmt.execute([name]) {
+        Ok(v) => {
+            if v == 1 {
+                println!("{:} deleted.", name)
+            }
+        }
+        Err(e) => println!("{:}", e),
+    }
 }
