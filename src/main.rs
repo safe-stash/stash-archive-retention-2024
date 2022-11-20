@@ -1,5 +1,6 @@
 use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use clap::{Parser, Subcommand};
+use passgen::password;
 use rusqlite::{Connection, Result};
 use scrypt::{password_hash::SaltString, Params};
 use std::error::Error;
@@ -61,6 +62,8 @@ enum Commands {
         /// Item name to be removed
         name: String,
     },
+    /// Generate password
+    Gen {},
 }
 
 type Aes256CbcEnc = cbc::Encryptor<aes::Aes256>;
@@ -78,11 +81,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let conn = sqlite_open("safe.db").expect("Failed to create or open sqlite db");
 
-    let key = kdf().unwrap();
     let iv = [0x24; 16];
 
     match &cli.command {
         Commands::Enc { input, output } => {
+            let key = kdf().unwrap();
             let buf = read_file(input)?;
             let res =
                 Aes256CbcEnc::new(&key.into(), &iv.into()).encrypt_padded_vec_mut::<Pkcs7>(&buf);
@@ -93,6 +96,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         Commands::Dec { input, output } => {
+            let key = kdf().unwrap();
             let buf = read_file(input)?;
             match Aes256CbcDec::new(&key.into(), &iv.into()).decrypt_padded_vec_mut::<Pkcs7>(&buf) {
                 Ok(res) => match output {
@@ -104,6 +108,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         Commands::Add { name, value, force } => {
+            let key = kdf().unwrap();
             let res = Aes256CbcEnc::new(&key.into(), &iv.into())
                 .encrypt_padded_vec_mut::<Pkcs7>(&value.as_bytes());
 
@@ -118,6 +123,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         Commands::Get { name } => match sqlite_get(&conn, &name) {
             Ok(item) => {
+                let key = kdf().unwrap();
                 match Aes256CbcDec::new(&key.into(), &iv.into())
                     .decrypt_padded_vec_mut::<Pkcs7>(&item.item_value)
                 {
@@ -137,6 +143,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         Commands::List {} => match sqlite_list(&conn) {
             Ok(items) => {
+                let key = kdf().unwrap();
                 for item in items {
                     match Aes256CbcDec::new(&key.into(), &iv.into())
                         .decrypt_padded_vec_mut::<Pkcs7>(&item.item_value)
@@ -156,21 +163,24 @@ fn main() -> Result<(), Box<dyn Error>> {
             Err(e) => println!("{:}", e),
         },
 
-        Commands::Remove { name } => {
-            match sqlite_get(&conn, &name) {
-                Ok(item) => {
-                    match Aes256CbcDec::new(&key.into(), &iv.into())
-                        .decrypt_padded_vec_mut::<Pkcs7>(&item.item_value)
-                    {
-                        Ok(_) => sqlite_remove(&conn, &name),                        
-                        Err(_) => {
-                            println!("Failed to remove an item");
-                            exit(1)
-                        }
+        Commands::Remove { name } => match sqlite_get(&conn, &name) {
+            Ok(item) => {
+                let key = kdf().unwrap();
+                match Aes256CbcDec::new(&key.into(), &iv.into())
+                    .decrypt_padded_vec_mut::<Pkcs7>(&item.item_value)
+                {
+                    Ok(_) => sqlite_remove(&conn, &name),
+                    Err(_) => {
+                        println!("Failed to remove an item");
+                        exit(1)
                     }
                 }
-                Err(e) => println!("{:}", e),
             }
+            Err(e) => println!("{:}", e),
+        },
+
+        Commands::Gen {} => {
+            println!("{}", password::generate());
         }
     }
 
