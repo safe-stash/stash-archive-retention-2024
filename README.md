@@ -19,7 +19,7 @@ A digital safe box.
 - [ ] server
   - [ ] PostgreSQL (app/service, user/email, password)
   - [ ] pre-defined types (password, note, bank account, id/passport, wifi password, key, etc)
-  - [ ] custome type (key-value)
+  - [ ] custom type (key-value)
   - [ ] API
 - [ ] salt based on user/email instead of hard-coded one
 
