@@ -156,7 +156,22 @@ fn main() -> Result<(), Box<dyn Error>> {
             Err(e) => println!("{:}", e),
         },
 
-        Commands::Remove { name } => sqlite_remove(&conn, &name),
+        Commands::Remove { name } => {
+            match sqlite_get(&conn, &name) {
+                Ok(item) => {
+                    match Aes256CbcDec::new(&key.into(), &iv.into())
+                        .decrypt_padded_vec_mut::<Pkcs7>(&item.item_value)
+                    {
+                        Ok(_) => sqlite_remove(&conn, &name),                        
+                        Err(_) => {
+                            println!("Failed to remove an item");
+                            exit(1)
+                        }
+                    }
+                }
+                Err(e) => println!("{:}", e),
+            }
+        }
     }
 
     Ok(())
