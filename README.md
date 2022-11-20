@@ -15,7 +15,8 @@ A digital safe box.
 - [ ] pick a better IV
 
 ## Password Manager
-- [ ] password generator
+- [X] password generator
+  - [ ] parametrize (length, upper, lower, number, symbol, readable)
 - [ ] server
   - [ ] PostgreSQL (app/service, user/email, password)
   - [ ] pre-defined types (password, note, bank account, id/passport, wifi password, key, etc)
