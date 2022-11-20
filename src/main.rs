@@ -7,6 +7,7 @@ use std::fs::File;
 use std::io;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::process::exit;
 
 #[derive(Parser, Debug)]
 #[command(about = "Safe is a digital safe box")]
@@ -55,7 +56,7 @@ enum Commands {
     },
     /// List saved items
     List {},
-    /// remove an item from vault
+    /// Remove an item from vault
     Remove {
         /// Item name to be removed
         name: String,
@@ -142,7 +143,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                             item.item_name,
                             String::from_utf8(res).expect("Failed to convert fetched data")
                         ),
-                        Err(e) => println!("Finding item error, decryption failed: {:?}", e),
+                        Err(_) => {
+                            println!("Failed to list items");
+                            exit(1)
+                        }
                     }
                 }
             }
