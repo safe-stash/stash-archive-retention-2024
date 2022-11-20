@@ -336,9 +336,6 @@ fn sqlite_list(conn: &Connection) -> Result<Vec<VaultItem>, Box<dyn Error>> {
 ///
 /// This function will return an error if cannot execute query on sqlite db.
 fn sqlite_remove(conn: &Connection, name: &String) {
-
-    //TODO: this is incorrect, with invalid password item will be removed!
-
     let mut stmt = conn
         .prepare("DELETE FROM vault WHERE item_name=?")
         .expect("Failed to prepare delete query");
