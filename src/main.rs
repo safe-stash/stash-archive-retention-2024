@@ -1,6 +1,6 @@
 use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use clap::{Parser, Subcommand};
-use passgen::password;
+use passworder::password;
 use rusqlite::{Connection, Result};
 use scrypt::{password_hash::SaltString, Params};
 use std::error::Error;

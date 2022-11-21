@@ -284,13 +284,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7b5bf27447411e9ee3ff51186bf7a08e16c341efdde93f4d823e8844429bed7e"
 
 [[package]]
-name = "passgen"
-version = "0.1.0"
-dependencies = [
- "rand",
-]
-
-[[package]]
 name = "password-hash"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -299,6 +292,15 @@ dependencies = [
  "base64ct",
  "rand_core",
  "subtle",
+]
+
+[[package]]
+name = "passworder"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "99a4e9e74298a207910a1dac4dbc0580a38d012d6734142124a8c21cf21ef30b"
+dependencies = [
+ "rand",
 ]
 
 [[package]]
@@ -426,7 +428,7 @@ dependencies = [
  "cbc",
  "clap",
  "hex",
- "passgen",
+ "passworder",
  "rpassword",
  "rusqlite",
  "scrypt",
