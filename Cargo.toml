@@ -2,8 +2,14 @@
 name = "safe"
 version = "0.1.0"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+license = "AGPL-3.0"
+description = "A digital safe box"
+homepage = "https://github.com/safe-stash/safe"
+# documentation = "https://docs.rs/safe"
+repository = "https://github.com/safe-stash/safe"
+readme = "README.md"
+keywords = ["cryptography", "vault", "password-manager", "safe-box"]
+categories = ["cryptography"]
 
 [dependencies]
 aes = "0.8.2"
