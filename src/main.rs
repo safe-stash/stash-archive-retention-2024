@@ -1,4 +1,5 @@
 use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
+use arboard::Clipboard;
 use clap::{Parser, Subcommand};
 use passworder::password;
 use rusqlite::{Connection, Result};
@@ -63,7 +64,11 @@ enum Commands {
         name: String,
     },
     /// Generate password
-    Gen {},
+    Gen {
+        /// Show password
+        #[arg(short, long)]
+        show: bool,
+    },
 }
 
 type Aes256CbcEnc = cbc::Encryptor<aes::Aes256>;
@@ -179,8 +184,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             Err(e) => println!("{:}", e),
         },
 
-        Commands::Gen {} => {
-            println!("{}", password::generate());
+        Commands::Gen { show } => {
+            let pass = password::generate();
+            if *show {
+                println!("Generated password is: {}", pass);
+            }
+            let mut clipboard = Clipboard::new().unwrap();
+            clipboard.set_text(pass).unwrap();
+            println!("Generated password copied in the clipboard!");
         }
     }
 
