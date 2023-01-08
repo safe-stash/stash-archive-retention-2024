@@ -191,7 +191,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             let mut clipboard = Clipboard::new().unwrap();
             clipboard.set_text(pass).unwrap();
-            println!("Generated password copied in the clipboard!");
+            println!("It's copied in the clipboard!");
         }
     }
 
