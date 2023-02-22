@@ -210,7 +210,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 /// This function will return an error if cannot open or read the input file.
 fn read_file(input: &PathBuf) -> Result<Vec<u8>, Box<dyn Error>> {
     let mut file = File::open(input)?;
-    let mut buf = Vec::<u8>::new();
+    let mut buf = Vec::new();
     file.read_to_end(&mut buf)?;
     Ok(buf)
 }
